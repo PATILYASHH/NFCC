@@ -75,8 +75,17 @@ DEFAULT_MAPPINGS: Dict[str, Dict[str, Dict[str, Any]]] = {
         "whatsapp": {
             "strategy": "whatsapp_paste",
             "auto_paste": True,
-            "wait_ms": 2500,
-            "use_wa_me": True,  # use https://wa.me/<digits> when chatHint is a phone number
+            # Routes to WhatsApp Desktop via the `whatsapp:` protocol
+            # handler when it's registered (Microsoft Store / standalone
+            # install both register it). Falls back to WhatsApp Web
+            # otherwise. Set false to always use the browser.
+            "prefer_desktop": True,
+            # Use https://wa.me/<digits> when chatHint is a phone number
+            # AND we end up in the web fallback.
+            "use_wa_me": True,
+            # Defaults to 1500 ms when Desktop is used, 2500 ms for Web.
+            # Pin a value here to override both.
+            # "wait_ms": 2000,
         },
         "generic": {
             "strategy": "url_or_launch",

@@ -10,6 +10,7 @@ from io import BytesIO
 
 import qrcode
 
+import installed_apps
 import mappings
 
 
@@ -225,6 +226,47 @@ def build_html(config: dict) -> str:
             </div>
         </div>
 
+        <!-- App Scanner -->
+        <div class="card mt-4">
+            <div class="card-header d-flex align-items-center py-3">
+                <i class="bi bi-search text-info me-2"></i>
+                <span class="fw-semibold">App Scanner</span>
+                <small class="text-secondary ms-2">find installed apps + pin them to phone packages</small>
+                <div class="ms-auto d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="rescanApps()" type="button">
+                        <i class="bi bi-arrow-repeat"></i> Rescan
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-secondary small mb-2">
+                    Scans Start Menu, App Paths registry, Scoop, Chocolatey,
+                    per-user Programs, and Microsoft Store shims. Smart Switch
+                    consults this list when the phone hands off an app the
+                    static aliases don't cover (AnyDesk, Figma, Obsidian, …).
+                </p>
+                <div class="d-flex gap-2 align-items-center mb-2">
+                    <input id="appSearchInput" class="form-control form-control-sm bg-dark text-light"
+                        placeholder="Search by name (e.g. anydesk, figma, vscode)…"
+                        oninput="renderApps()" style="border-color:#30363D"/>
+                    <span id="appCount" class="text-secondary small" style="white-space:nowrap"></span>
+                </div>
+                <div id="appList" class="action-list" style="max-height:300px"></div>
+
+                <hr style="border-color:#21262D; margin:16px 0"/>
+                <div class="small text-secondary mb-2"><i class="bi bi-plus-circle me-1"></i> Add a portable / unlisted .exe</div>
+                <div class="d-flex gap-2">
+                    <input id="manualAppName" class="form-control form-control-sm bg-dark text-light"
+                        placeholder="Display name (e.g. AnyDesk)" style="border-color:#30363D; max-width:220px"/>
+                    <input id="manualAppPath" class="form-control form-control-sm bg-dark text-light"
+                        placeholder="Full path to .exe (e.g. C:\\Program Files\\AnyDesk\\AnyDesk.exe)"
+                        style="border-color:#30363D"/>
+                    <button class="btn btn-sm btn-info" onclick="addManualApp()" type="button">Add</button>
+                </div>
+                <div id="appStatus" class="small mt-2" style="min-height:1.1em"></div>
+            </div>
+        </div>
+
         <!-- Smart Switch Mappings -->
         <div class="card mt-4">
             <div class="card-header d-flex align-items-center py-3">
@@ -382,6 +424,142 @@ def build_html(config: dict) -> str:
         }}
 
         loadMappings();
+
+        // ── App Scanner ──────────────────────────────────────────────────
+        let _allApps = [];
+
+        function setAppStatus(text, kind) {{
+            const el = document.getElementById('appStatus');
+            el.textContent = text || '';
+            el.className = 'small mt-2 ' + (
+                kind === 'ok' ? 'text-success' :
+                kind === 'err' ? 'text-danger' : 'text-secondary');
+        }}
+
+        function loadApps() {{
+            fetch('/api/installed_apps')
+                .then(r => r.json())
+                .then(data => {{
+                    if (!data.ok) {{ setAppStatus(data.error || 'load failed', 'err'); return; }}
+                    const apps = (data.manual || []).concat(data.apps || []);
+                    _allApps = apps;
+                    if (apps.length === 0) {{
+                        setAppStatus('No apps cached yet. Click Rescan.', 'info');
+                    }} else {{
+                        const dt = data.scannedAt ? new Date(data.scannedAt * 1000).toLocaleString() : 'never';
+                        setAppStatus('Last scan: ' + dt, 'info');
+                    }}
+                    renderApps();
+                }})
+                .catch(e => setAppStatus('Load failed: ' + e, 'err'));
+        }}
+
+        function renderApps() {{
+            const q = (document.getElementById('appSearchInput').value || '').toLowerCase();
+            const list = document.getElementById('appList');
+            const filtered = !q ? _allApps : _allApps.filter(a =>
+                (a.name || '').toLowerCase().includes(q) ||
+                (a.path || '').toLowerCase().includes(q));
+            document.getElementById('appCount').textContent =
+                filtered.length + ' / ' + _allApps.length;
+            if (filtered.length === 0) {{
+                list.innerHTML = '<div class="text-center text-secondary py-3 small">No matches</div>';
+                return;
+            }}
+            // Cap to 200 rows for perf — search narrows further.
+            list.innerHTML = filtered.slice(0, 200).map(a => `
+                <div class="action-item d-flex align-items-center" style="gap:10px">
+                    <div class="flex-grow-1" style="min-width:0">
+                        <div class="small fw-medium">${{escapeHtml(a.name || '')}}</div>
+                        <div class="text-secondary" style="font-size:0.7rem; word-break:break-all">${{escapeHtml(a.path || '')}}</div>
+                    </div>
+                    <span class="badge badge-info">${{escapeHtml(a.source || '')}}</span>
+                    <button class="btn btn-sm btn-outline-info" onclick="pinAppPrompt(${{JSON.stringify(a.path || '').replace(/"/g, '&quot;')}})" type="button">
+                        <i class="bi bi-link-45deg"></i> Map
+                    </button>
+                    ${{a.source === 'Manual' ? `<button class="btn btn-sm btn-outline-danger" onclick="removeManualApp(${{JSON.stringify(a.path).replace(/"/g, '&quot;')}})" type="button"><i class="bi bi-x"></i></button>` : ''}}
+                </div>
+            `).join('');
+        }}
+
+        function escapeHtml(s) {{
+            return String(s).replace(/[&<>"']/g, c => ({{
+                '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+            }}[c]));
+        }}
+
+        function rescanApps() {{
+            setAppStatus('Scanning…', 'info');
+            fetch('/api/installed_apps/scan', {{ method: 'POST' }})
+                .then(r => r.json())
+                .then(data => {{
+                    if (!data.ok) {{ setAppStatus('Scan failed: ' + (data.error || 'unknown'), 'err'); return; }}
+                    _allApps = (data.manual || []).concat(data.apps || []);
+                    renderApps();
+                    setAppStatus('Found ' + (data.apps || []).length + ' apps.', 'ok');
+                }})
+                .catch(e => setAppStatus('Scan failed: ' + e, 'err'));
+        }}
+
+        function addManualApp() {{
+            const name = document.getElementById('manualAppName').value.trim();
+            const path = document.getElementById('manualAppPath').value.trim();
+            if (!name || !path) {{ setAppStatus('Name + path required', 'err'); return; }}
+            fetch('/api/installed_apps/manual', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ name, path }}),
+            }})
+                .then(r => r.json())
+                .then(data => {{
+                    if (!data.ok) {{ setAppStatus('Add failed: ' + (data.error || 'unknown'), 'err'); return; }}
+                    document.getElementById('manualAppName').value = '';
+                    document.getElementById('manualAppPath').value = '';
+                    _allApps = (data.manual || []).concat(data.apps || []);
+                    renderApps();
+                    setAppStatus('Added.', 'ok');
+                }})
+                .catch(e => setAppStatus('Add failed: ' + e, 'err'));
+        }}
+
+        function removeManualApp(path) {{
+            fetch('/api/installed_apps/manual/remove', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ path }}),
+            }})
+                .then(r => r.json())
+                .then(data => {{
+                    if (!data.ok) {{ setAppStatus('Remove failed: ' + (data.error || 'unknown'), 'err'); return; }}
+                    _allApps = (data.manual || []).concat(data.apps || []);
+                    renderApps();
+                    setAppStatus('Removed.', 'ok');
+                }})
+                .catch(e => setAppStatus('Remove failed: ' + e, 'err'));
+        }}
+
+        function pinAppPrompt(path) {{
+            const pkg = prompt(
+                'Map this PC app to which Android package?\\n\\n' +
+                'Open the action log on the dashboard, copy the appPkg from a recent failed Smart Switch entry — e.g. com.anydesk.anydeskandroid — and paste it here.',
+                ''
+            );
+            if (!pkg) return;
+            fetch('/api/installed_apps/map_package', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify({{ appPkg: pkg.trim(), path }}),
+            }})
+                .then(r => r.json())
+                .then(data => {{
+                    if (!data.ok) {{ setAppStatus('Pin failed: ' + (data.error || 'unknown'), 'err'); return; }}
+                    setAppStatus('Pinned ' + pkg.trim() + ' → ' + path.split(/[\\\\/]/).pop(), 'ok');
+                    loadMappings();  // refresh mappings panel so the new entry shows
+                }})
+                .catch(e => setAppStatus('Pin failed: ' + e, 'err'));
+        }}
+
+        loadApps();
     </script>
 </body>
 </html>"""
@@ -415,6 +593,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "user": mappings.get_user_mappings(),
                 "effective": mappings.get_effective_mappings(),
             })
+        elif self.path == '/api/installed_apps':
+            try:
+                self._write_json(200, {
+                    "ok": True,
+                    **installed_apps._read_cache(),
+                })
+            except Exception as e:
+                self._write_json(500, {"ok": False, "error": str(e)})
         else:
             html = build_html(self.config)
             self.send_response(200)
@@ -468,6 +654,55 @@ class DashboardHandler(BaseHTTPRequestHandler):
                                        "effective": mappings.get_effective_mappings()})
             except Exception as e:
                 self._write_json(500, {"ok": False, "error": str(e)})
+        elif self.path == '/api/installed_apps/scan':
+            try:
+                fresh = installed_apps.rescan()
+                self._write_json(200, {"ok": True, **fresh})
+            except Exception as e:
+                self._write_json(500, {"ok": False, "error": str(e)})
+        elif self.path == '/api/installed_apps/manual':
+            try:
+                length = int(self.headers.get('Content-Length') or 0)
+                body = self.rfile.read(length) if length else b''
+                data = json.loads(body.decode() or '{}')
+                cache = installed_apps.add_manual(
+                    data.get("name", ""), data.get("path", "")
+                )
+                self._write_json(200, {"ok": True, **cache})
+            except Exception as e:
+                self._write_json(400, {"ok": False, "error": str(e)})
+        elif self.path == '/api/installed_apps/manual/remove':
+            try:
+                length = int(self.headers.get('Content-Length') or 0)
+                body = self.rfile.read(length) if length else b''
+                data = json.loads(body.decode() or '{}')
+                cache = installed_apps.remove_manual(data.get("path", ""))
+                self._write_json(200, {"ok": True, **cache})
+            except Exception as e:
+                self._write_json(400, {"ok": False, "error": str(e)})
+        elif self.path == '/api/installed_apps/map_package':
+            # Pin a phone Android package to a specific PC .exe path —
+            # writes a `by_package` entry into mappings.json with the
+            # launch_app strategy + app_path field.
+            try:
+                length = int(self.headers.get('Content-Length') or 0)
+                body = self.rfile.read(length) if length else b''
+                data = json.loads(body.decode() or '{}')
+                pkg = (data.get("appPkg") or "").strip()
+                path = (data.get("path") or "").strip()
+                if not pkg or not path:
+                    raise ValueError("appPkg and path required")
+                user = mappings.get_user_mappings()
+                user.setdefault("by_package", {})
+                user["by_package"][pkg] = {
+                    "strategy": "launch_app",
+                    "app_path": path,
+                }
+                mappings.save_mappings(user)
+                self._write_json(200, {"ok": True,
+                                       "effective": mappings.get_effective_mappings()})
+            except Exception as e:
+                self._write_json(400, {"ok": False, "error": str(e)})
         else:
             self._write_json(404, {"ok": False, "error": "not found"})
 
