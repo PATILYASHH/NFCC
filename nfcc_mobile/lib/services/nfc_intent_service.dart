@@ -49,4 +49,13 @@ class NfcIntentService {
       return false;
     }
   }
+
+  /// If MainActivity was launched purely to flush a queued NFC tap (no
+  /// app UI needed), tell native to drop us back behind whatever the user
+  /// was looking at. No-op when the user opened NFCC normally.
+  Future<void> retreatIfColdStartDispatch() async {
+    try {
+      await _methodChannel.invokeMethod<void>('retreatIfColdStartDispatch');
+    } catch (_) { /* best-effort */ }
+  }
 }

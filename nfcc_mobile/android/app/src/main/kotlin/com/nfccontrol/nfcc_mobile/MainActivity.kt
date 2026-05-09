@@ -32,6 +32,11 @@ class MainActivity : FlutterActivity() {
     // When true, foreground dispatch is disabled so nfc_manager plugin can handle tags
     private var foregroundDispatchSuppressed = false
 
+    // True when this activity was started by NfcReceiverActivity to flush
+    // a queued NFC tap on a cold start. Triggers moveTaskToBack once
+    // Flutter reports it's done dispatching.
+    private var coldStartDispatch = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -60,6 +65,18 @@ class MainActivity : FlutterActivity() {
                         Log.d(TAG, "Foreground dispatch re-enabled by Flutter")
                         result.success(true)
                     }
+                    "retreatIfColdStartDispatch" -> {
+                        // Flutter says "I'm done dispatching that NFC tap" —
+                        // if we were launched purely to handle the tag (cold
+                        // start), drop NFCC back to the system stack so the
+                        // user stays in whatever app they were in.
+                        if (coldStartDispatch) {
+                            Log.d(TAG, "Cold-start dispatch done — moveTaskToBack")
+                            coldStartDispatch = false
+                            moveTaskToBack(true)
+                        }
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -73,6 +90,10 @@ class MainActivity : FlutterActivity() {
         val PHONE_ACTIONS_CHANNEL = "com.nfccontrol/phone_actions"
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PHONE_ACTIONS_CHANNEL)
             .setMethodCallHandler(PhoneActionExecutor(this))
+
+        // Smart Switch channel - captures foreground app/URL/draft for PC handoff
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SmartSwitchCapture.CHANNEL)
+            .setMethodCallHandler(SmartSwitchCapture(this))
 
         // Event channel for streaming NFC tag data to Flutter
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, NFC_EVENT_CHANNEL)
@@ -98,6 +119,11 @@ class MainActivity : FlutterActivity() {
                     eventSink = null
                 }
             })
+
+        // If NfcReceiverActivity launched us purely to flush a queued tap,
+        // remember it so we can call moveTaskToBack once Flutter is done.
+        coldStartDispatch =
+            intent?.getBooleanExtra("nfcc_cold_start_dispatch", false) == true
 
         // Handle intent that launched this activity (cold start)
         handleNfcIntent(intent)
@@ -139,6 +165,9 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.getBooleanExtra("nfcc_cold_start_dispatch", false)) {
+            coldStartDispatch = true
+        }
         // Foreground dispatch delivers NFC here when app is visible
         handleNfcIntent(intent)
     }

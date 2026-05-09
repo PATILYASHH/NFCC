@@ -6,9 +6,13 @@ import '../../services/silent_executor.dart';
 import '../theme/app_theme.dart';
 import '../widgets/tag_picker_sheet.dart';
 import '../widgets/todo_tap_sheet.dart';
+import '../../models/action_item.dart';
+import '../../models/automation.dart';
+import '../../models/condition_branch.dart';
 import 'nfc_writer_screen.dart';
 import 'routines_screen.dart';
 import 'settings_screen.dart';
+import 'smart_switch_screen.dart';
 import 'todos_screen.dart';
 import 'trackers_screen.dart';
 
@@ -24,6 +28,7 @@ class _HomeScreenState extends State<HomeScreen>
   late TabController _tabController;
 
   int _routineCount = 0;
+  int _smartSwitchTagCount = 0;
   int _trackerCount = 0;
   int _todoCount = 0;
   int _todosDoneToday = 0;
@@ -51,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen>
       if (!mounted) return;
       setState(() {
         _routineCount = routines.length;
+        _smartSwitchTagCount = routines.where(_isSmartSwitchOnly).length;
         _trackerCount = trackers.length;
         _todoCount = todos.length;
         _todosDoneToday = todos.where((t) => t.doneToday).length;
@@ -59,6 +65,19 @@ class _HomeScreenState extends State<HomeScreen>
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// Mirror of SmartSwitchScreen's classifier — keep in sync.
+  /// Used to split the home counts so the Routines card doesn't
+  /// double-count Smart Switch tags.
+  static bool _isSmartSwitchOnly(Automation a) {
+    if (a.tagUid == null) return false;
+    if (a.branches.length != 1) return false;
+    final b = a.branches.first;
+    if (b.type != ConditionType.always) return false;
+    if (b.actions.length != 1) return false;
+    final act = b.actions.first;
+    return act.target == ActionTarget.pc && act.actionType == 'smartSwitch';
   }
 
   Future<void> _openAndReload(Widget screen) async {
@@ -272,12 +291,23 @@ class _HomeScreenState extends State<HomeScreen>
         padding: const EdgeInsets.fromLTRB(16, 4, 16, 40),
         children: [
           _buildCategoryCard(
+            icon: Icons.swap_horiz_rounded,
+            gradient: const [Color(0xFF00B0FF), Color(0xFF22D3EE)],
+            title: 'Smart Switch',
+            subtitle: 'Tag → send the page on your phone to PC',
+            count: _smartSwitchTagCount,
+            countLabel: _smartSwitchTagCount == 1 ? 'tag' : 'tags',
+            onTap: () => _openAndReload(const SmartSwitchScreen()),
+          ),
+          const SizedBox(height: 12),
+          _buildCategoryCard(
             icon: Icons.auto_awesome_rounded,
             gradient: const [Color(0xFF3B82F6), Color(0xFF00B0FF)],
             title: 'Routines',
             subtitle: 'Time / WiFi / BT based automations',
-            count: _routineCount,
-            countLabel: _routineCount == 1 ? 'automation' : 'automations',
+            count: _routineCount - _smartSwitchTagCount,
+            countLabel:
+                (_routineCount - _smartSwitchTagCount) == 1 ? 'automation' : 'automations',
             onTap: () => _openAndReload(const RoutinesScreen()),
           ),
           const SizedBox(height: 12),

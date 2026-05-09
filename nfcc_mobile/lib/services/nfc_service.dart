@@ -174,6 +174,46 @@ class NfcService {
     );
   }
 
+  /// Write [records] AND return the tag UID. The Smart Switch one-tap flow
+  /// uses this so it can pair the freshly-written tag to an auto-created
+  /// automation in a single physical tap.
+  Future<void> startWriteAndIdentifySession({
+    required List<NdefRecord> records,
+    required void Function(bool success, String? uid, String message) onResult,
+  }) async {
+    await _stopSession();
+    _sessionActive = true;
+    await _suppressForegroundDispatch();
+
+    await NfcManager.instance.startSession(
+      pollingOptions: {
+        NfcPollingOption.iso14443,
+        NfcPollingOption.iso15693,
+      },
+      onDiscovered: (NfcTag tag) async {
+        final uid = _extractUid(tag);
+        try {
+          if (defaultTargetPlatform != TargetPlatform.android) {
+            onResult(false, uid, 'NFC write only supported on Android');
+          } else {
+            final ndef = NdefAndroid.from(tag);
+            if (ndef == null) {
+              onResult(false, uid, 'Tag does not support NDEF');
+            } else if (!ndef.isWritable) {
+              onResult(false, uid, 'Tag is not writable');
+            } else {
+              await ndef.writeNdefMessage(NdefMessage(records: records));
+              onResult(true, uid, 'Written successfully');
+            }
+          }
+        } catch (e) {
+          onResult(false, uid, 'Write failed: $e');
+        }
+        await _stopSession();
+      },
+    );
+  }
+
   /// Format/erase a tag by writing empty NDEF
   Future<void> startFormatSession({
     required void Function(bool success, String message) onResult,

@@ -28,6 +28,8 @@ enum PhoneActionType {
 }
 
 enum PcActionType {
+  // Handoff
+  smartSwitch,
   // Apps & commands
   launchApp,
   closeApp,
@@ -210,6 +212,8 @@ class ActionItem {
       }
     } else {
       switch (actionType) {
+        case 'smartSwitch':
+          return IconInfo(0xe8d5, 'Smart Switch'); // swap_horiz
         case 'launchApp':
           return IconInfo(0xe5c3, 'Launch App');
         case 'minimizeAll':

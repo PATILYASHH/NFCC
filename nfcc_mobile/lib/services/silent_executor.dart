@@ -8,7 +8,9 @@ import '../models/tag_scan_log.dart';
 import '../models/todo.dart';
 import '../models/tracker_log.dart';
 import 'database_service.dart';
+import 'nfc_intent_service.dart';
 import 'pc_connection_service.dart';
+import 'smart_switch_capture_service.dart';
 
 /// Executes automations silently. No UI, no notifications.
 /// Vibrates: 2x short = success, 1x long = failure.
@@ -131,6 +133,12 @@ class SilentExecutor {
     await _vibrate(success: fails == 0);
     await _logScan(uid, tag.nickname, automation.name, matched.label, fails == 0, null);
     debugPrint('NFCC: Done. $fails failures.');
+
+    // If MainActivity was launched purely to flush this tap (cold start),
+    // tell native to step back so the user stays in whatever app they
+    // were using when they tapped the tag. No-op when NFCC was already
+    // foreground.
+    await NfcIntentService().retreatIfColdStartDispatch();
   }
 
   Future<bool> _exec(ActionItem action) async {
@@ -138,7 +146,15 @@ class SilentExecutor {
       if (action.target == ActionTarget.pc) {
         final pc = PcConnectionService();
         if (!pc.isConnected) return false;
-        final r = await pc.sendAction(action);
+
+        // Smart Switch params are captured at tap time, not at save time —
+        // we ship the page that's foreground RIGHT NOW. Native prefers the
+        // accessibility snapshot pinned by NfcReceiverActivity at the
+        // moment of the tap (see SmartSwitchCapture.kt).
+        final resolved = action.actionType == 'smartSwitch'
+            ? action.copyWith(params: await SmartSwitchCaptureService().capture())
+            : action;
+        final r = await pc.sendAction(resolved);
         return r?['success'] == true;
       } else {
         return await _execPhoneAction(action);

@@ -97,6 +97,12 @@ class NfcReceiverActivity : Activity() {
 
         Log.d(TAG, "Tag: uid=$uid ndef=$ndefText")
 
+        // Pin the accessibility snapshot RIGHT NOW so a Smart Switch
+        // automation paired to this tag will see the page that was on
+        // screen at tap time — not whatever wins focus while NFCC starts.
+        // The accessibility service runs whether NFCC is alive or not.
+        snapshotForegroundForSmartSwitch(uid)
+
         // Handle UPI payment tags: payload format "UPI:<package>:<uri>"
         if (ndefText != null && ndefText!!.startsWith("UPI:")) {
             val parts = ndefText!!.substring(4).split(":", limit = 2)
@@ -129,16 +135,64 @@ class NfcReceiverActivity : Activity() {
         if (callback != null) {
             callback(uid, ndefText)
             Log.d(TAG, "Sent to Flutter")
+            vibrateOnce()
         } else {
-            // App not running - save to SharedPreferences for later pickup
-            Log.w(TAG, "No Flutter callback - saving to SharedPreferences")
+            // App not running — save to SharedPreferences AND launch
+            // MainActivity to process. MainActivity will retreat to back
+            // once Flutter signals dispatch complete (auto_back flag).
+            Log.w(TAG, "No Flutter callback — staging tag for cold-start dispatch")
             val prefs = getSharedPreferences("nfcc_pending_tag", MODE_PRIVATE)
             prefs.edit()
                 .putString("uid", uid)
                 .putString("ndefText", ndefText)
                 .putLong("timestamp", System.currentTimeMillis())
+                .putBoolean("auto_back", true)
                 .apply()
             vibrateOnce()
+            launchMainActivityHeadless()
+        }
+    }
+
+    /**
+     * Capture the live accessibility snapshot to SharedPrefs so the Flutter
+     * automation engine — once it eventually runs — can use the page that
+     * was foreground at NFC-tap time, not the one that wins focus when
+     * MainActivity launches.
+     */
+    private fun snapshotForegroundForSmartSwitch(uid: String) {
+        val snap = SmartSwitchAccessibilityService.latest
+        if (snap.foregroundPackage == null) return
+        getSharedPreferences("nfcc_smart_switch_snapshot", MODE_PRIVATE)
+            .edit()
+            .putString("tagUid", uid)
+            .putString("foregroundPackage", snap.foregroundPackage)
+            .putString("browserUrl", snap.browserUrl)
+            .putString("whatsappChatTitle", snap.whatsappChatTitle)
+            .putString("whatsappDraft", snap.whatsappDraft)
+            .putLong("capturedAtMs", snap.capturedAtMs)
+            .putLong("savedAtMs", System.currentTimeMillis())
+            .apply()
+    }
+
+    /**
+     * Cold-start dispatch path: bring up MainActivity so its Flutter engine
+     * can run the automation. We can't avoid the brief launch; we mitigate
+     * it by setting the `auto_back` flag — MainActivity calls
+     * moveTaskToBack(true) after Flutter reports the dispatch is done.
+     */
+    private fun launchMainActivityHeadless() {
+        try {
+            val launch = Intent(this, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_NO_USER_ACTION
+                )
+                putExtra("nfcc_cold_start_dispatch", true)
+            }
+            startActivity(launch)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch MainActivity for cold-start dispatch: ${e.message}")
         }
     }
 

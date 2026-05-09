@@ -10,6 +10,8 @@ from io import BytesIO
 
 import qrcode
 
+import mappings
+
 
 def get_local_ip() -> str:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -223,6 +225,47 @@ def build_html(config: dict) -> str:
             </div>
         </div>
 
+        <!-- Smart Switch Mappings -->
+        <div class="card mt-4">
+            <div class="card-header d-flex align-items-center py-3">
+                <i class="bi bi-arrow-left-right text-info me-2"></i>
+                <span class="fw-semibold">Smart Switch Mappings</span>
+                <small class="text-secondary ms-2">phone-app → PC action</small>
+                <div class="ms-auto d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="resetMappings()" type="button">
+                        <i class="bi bi-arrow-counterclockwise"></i> Reset to defaults
+                    </button>
+                    <button class="btn btn-sm btn-info" onclick="saveMappings()" type="button">
+                        <i class="bi bi-save"></i> Save
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <p class="text-secondary small mb-2">
+                    Edit the JSON below to override how Smart Switch handles a phone
+                    app or kind. <code>by_package</code> entries win over
+                    <code>by_kind</code>. Strategies: <code>url</code>,
+                    <code>static_url</code>, <code>desktop_uri</code>,
+                    <code>desktop_uri_then_url</code>, <code>url_or_launch</code>,
+                    <code>launch_app</code>, <code>whatsapp_paste</code>.
+                    Browsers: <code>default</code>, <code>chrome</code>,
+                    <code>edge</code>, <code>firefox</code>, <code>brave</code>.
+                </p>
+                <div id="mappingStatus" class="small mb-2" style="min-height:1.1em"></div>
+                <textarea id="mappingsEditor"
+                    class="form-control bg-dark text-light"
+                    style="font-family:'Cascadia Code', Consolas, monospace; font-size:12px; min-height:280px; border-color:#30363D"
+                    spellcheck="false"></textarea>
+                <details class="mt-3">
+                    <summary class="text-secondary small" style="cursor:pointer">
+                        Defaults (read-only reference)
+                    </summary>
+                    <pre id="mappingDefaults" class="mt-2 p-3 small"
+                        style="background:#0D1117; border:1px solid #21262D; border-radius:8px; max-height:240px; overflow:auto"></pre>
+                </details>
+            </div>
+        </div>
+
         <p class="text-center text-secondary small mt-4">
             <i class="bi bi-shield-check me-1"></i> All communication is local network only &bull; No cloud
         </p>
@@ -276,6 +319,69 @@ def build_html(config: dict) -> str:
 
         loadData();
         setInterval(loadData, 2000);
+
+        // ── Smart Switch Mappings ────────────────────────────────────────
+        function setMappingStatus(text, kind) {{
+            const el = document.getElementById('mappingStatus');
+            el.textContent = text || '';
+            el.className = 'small mb-2 ' + (
+                kind === 'ok' ? 'text-success' :
+                kind === 'err' ? 'text-danger' : 'text-secondary');
+        }}
+
+        function loadMappings() {{
+            fetch('/api/mappings')
+                .then(r => r.json())
+                .then(data => {{
+                    const editor = document.getElementById('mappingsEditor');
+                    // Show user overrides if any, else seed with effective
+                    // (defaults) so the user can edit in place.
+                    const seed = (data.user && Object.keys(data.user).length)
+                        ? data.user
+                        : data.effective;
+                    editor.value = JSON.stringify(seed, null, 2);
+                    document.getElementById('mappingDefaults').textContent =
+                        JSON.stringify(data.defaults, null, 2);
+                    setMappingStatus('', 'info');
+                }})
+                .catch(e => setMappingStatus('Load failed: ' + e, 'err'));
+        }}
+
+        function saveMappings() {{
+            const text = document.getElementById('mappingsEditor').value;
+            let parsed;
+            try {{ parsed = JSON.parse(text); }}
+            catch (e) {{ setMappingStatus('Invalid JSON: ' + e.message, 'err'); return; }}
+            setMappingStatus('Saving…', 'info');
+            fetch('/api/mappings', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify(parsed)
+            }})
+                .then(r => r.json())
+                .then(data => {{
+                    if (data.ok) setMappingStatus('Saved.', 'ok');
+                    else setMappingStatus('Save failed: ' + (data.error || 'unknown'), 'err');
+                }})
+                .catch(e => setMappingStatus('Save failed: ' + e, 'err'));
+        }}
+
+        function resetMappings() {{
+            if (!confirm('Reset Smart Switch mappings to defaults? Your overrides will be deleted.')) return;
+            fetch('/api/mappings/reset', {{ method: 'POST' }})
+                .then(r => r.json())
+                .then(data => {{
+                    if (data.ok) {{
+                        setMappingStatus('Reset to defaults.', 'ok');
+                        loadMappings();
+                    }} else {{
+                        setMappingStatus('Reset failed: ' + (data.error || 'unknown'), 'err');
+                    }}
+                }})
+                .catch(e => setMappingStatus('Reset failed: ' + e, 'err'));
+        }}
+
+        loadMappings();
     </script>
 </body>
 </html>"""
@@ -301,6 +407,13 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "devices": len(state.connected_devices),
                 "actions": state.action_log,
                 "action_count": len(state.action_log),
+            })
+        elif self.path == '/api/mappings':
+            self._write_json(200, {
+                "ok": True,
+                "defaults": mappings.DEFAULT_MAPPINGS,
+                "user": mappings.get_user_mappings(),
+                "effective": mappings.get_effective_mappings(),
             })
         else:
             html = build_html(self.config)
@@ -328,6 +441,31 @@ class DashboardHandler(BaseHTTPRequestHandler):
             try:
                 result = cb()
                 self._write_json(200, {"ok": True, **(result or {})})
+            except Exception as e:
+                self._write_json(500, {"ok": False, "error": str(e)})
+        elif self.path == '/api/mappings':
+            try:
+                length = int(self.headers.get('Content-Length') or 0)
+                body = self.rfile.read(length) if length else b''
+                data = json.loads(body.decode() or '{}')
+                if not isinstance(data, dict):
+                    raise ValueError("mappings body must be a JSON object")
+                # Only persist the two known buckets — guards against the
+                # user pasting unrelated junk into the editor.
+                clean = {
+                    "by_kind": data.get("by_kind") or {},
+                    "by_package": data.get("by_package") or {},
+                }
+                mappings.save_mappings(clean)
+                self._write_json(200, {"ok": True,
+                                       "effective": mappings.get_effective_mappings()})
+            except Exception as e:
+                self._write_json(400, {"ok": False, "error": str(e)})
+        elif self.path == '/api/mappings/reset':
+            try:
+                mappings.reset_mappings()
+                self._write_json(200, {"ok": True,
+                                       "effective": mappings.get_effective_mappings()})
             except Exception as e:
                 self._write_json(500, {"ok": False, "error": str(e)})
         else:

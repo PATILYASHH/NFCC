@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="smart_switch_accessibility_description">Lets NFCC read the foreground app + browser URL bar + WhatsApp draft so it can hand off the current activity to your paired PC when you tap a Smart Switch tag. Only invoked at tap time; nothing is logged or sent in the background.</string>
+</resources>

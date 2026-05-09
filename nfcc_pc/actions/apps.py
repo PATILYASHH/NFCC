@@ -1,5 +1,6 @@
 """App & command launching actions."""
 
+import shutil
 import subprocess
 import webbrowser
 
@@ -54,6 +55,16 @@ def launch_app(params: dict) -> ActionResult:
     if not app_cmd:
         return fail("No path or name provided")
 
+    # When the caller supplied no full path AND no alias matched, only
+    # proceed if the bare name actually resolves to a real executable on
+    # PATH or to a known shell URI scheme. Otherwise `cmd /c start "" <x>`
+    # pops the system "Windows cannot find <x>" modal — which we never
+    # want, especially on Smart Switch where `name` comes from whatever
+    # Android reported as the foreground label.
+    if not path and name and APP_ALIASES.get(name) is None:
+        if not _looks_launchable(app_cmd):
+            return fail(f"No PC equivalent for '{name}'")
+
     if target:
         # Direct exec so the app receives `target` as argv[1].
         try:
@@ -68,6 +79,17 @@ def launch_app(params: dict) -> ActionResult:
 
     subprocess.Popen(["cmd", "/c", "start", "", app_cmd], shell=False)
     return ok(f"Launched: {app_cmd}")
+
+
+def _looks_launchable(cmd: str) -> bool:
+    """True if `cmd` is something `start ""` won't choke on."""
+    if not cmd:
+        return False
+    # ms-settings:, ms-store:, mailto:, etc. — Windows resolves these.
+    if ":" in cmd and not cmd[1:3] == ":\\":
+        return True
+    # Real binary on PATH.
+    return shutil.which(cmd) is not None
 
 
 def close_app(params: dict) -> ActionResult:

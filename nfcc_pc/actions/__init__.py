@@ -8,13 +8,16 @@ Keep this module as a thin router — put logic in category modules.
 
 from typing import Callable, Dict
 
-from . import apps, info, input_, media, network, screen, shortcuts, system, window
+from . import apps, handoff, info, input_, media, network, screen, shortcuts, system, window
 from ._common import ActionResult
 
 Handler = Callable[[dict], ActionResult]
 
 
 ACTION_MAP: Dict[str, Handler] = {
+    # Handoff
+    "smartSwitch": handoff.smart_switch,
+
     # Apps & commands
     "launchApp": apps.launch_app,
     "closeApp": apps.close_app,

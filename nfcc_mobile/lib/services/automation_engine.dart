@@ -4,6 +4,7 @@ import '../models/condition_branch.dart';
 import '../models/tag_scan_log.dart';
 import 'database_service.dart';
 import 'pc_connection_service.dart';
+import 'smart_switch_capture_service.dart';
 
 class AutomationEngineResult {
   final ConditionBranch? matchedBranch;
@@ -66,10 +67,17 @@ class AutomationEngine {
 
     // Execute all actions in the matched branch
     final actionResults = <ActionExecutionResult>[];
-    for (final action in matchedBranch.actions) {
-      if (action.delayMs > 0) {
-        await Future.delayed(Duration(milliseconds: action.delayMs));
+    for (final stored in matchedBranch.actions) {
+      if (stored.delayMs > 0) {
+        await Future.delayed(Duration(milliseconds: stored.delayMs));
       }
+
+      // Smart Switch is the only action whose params are resolved at tap
+      // time (capture the foreground app/URL/draft from the phone right
+      // now, then ship that to the PC). Every other action runs as stored.
+      final action = stored.actionType == 'smartSwitch'
+          ? await _resolveSmartSwitch(stored)
+          : stored;
 
       final result = await _executeAction(action);
       actionResults.add(result);
@@ -94,7 +102,25 @@ class AutomationEngine {
     }
   }
 
+  /// Capture the phone's current foreground state and stuff it into the
+  /// action's params. The stored action carries empty params; this fills
+  /// them in for this tap only — see SmartSwitchCapture.kt for the schema.
+  Future<ActionItem> _resolveSmartSwitch(ActionItem stored) async {
+    final captured = await SmartSwitchCaptureService().capture();
+    return stored.copyWith(params: captured);
+  }
+
   Future<ActionExecutionResult> _executePcAction(ActionItem action) async {
+    // Smart Switch with no useful payload — short-circuit before hitting
+    // the PC so the user gets a clear "nothing to hand off" message
+    // instead of a generic failure.
+    if (action.actionType == 'smartSwitch' && !isUsefulHandoff(action.params)) {
+      return ActionExecutionResult(
+        action: action,
+        success: false,
+        message: 'Nothing to hand off',
+      );
+    }
     final pcService = PcConnectionService();
     if (!pcService.isConnected) {
       return ActionExecutionResult(

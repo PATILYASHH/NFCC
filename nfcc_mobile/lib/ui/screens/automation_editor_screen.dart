@@ -22,18 +22,28 @@ class _AutomationEditorScreenState extends State<AutomationEditorScreen> {
   late TextEditingController _nameController;
   late List<ConditionBranch> _branches;
   bool _isNew = true;
+  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
     _isNew = widget.automation == null;
     _nameController = TextEditingController(text: widget.automation?.name ?? '');
-    _branches = widget.automation?.branches.toList() ?? [];
+    // Deep-copy branches so edits don't mutate widget.automation in place
+    // (which would survive a "discard" / back navigation).
+    _branches = (widget.automation?.branches ?? const [])
+        .map((b) => b.copyWith(
+              subConditions: List.of(b.subConditions),
+              actions: List.of(b.actions),
+            ))
+        .toList();
     if (_branches.isEmpty) {
+      // Fresh automation: start with an empty IF branch the user can fill in,
+      // not an "Otherwise" branch (which hides the condition picker).
       _branches.add(ConditionBranch(
         orderIndex: 0,
-        type: ConditionType.always,
-        actions: [],
+        type: ConditionType.timeRange,
+        actions: const [],
       ));
     }
   }
@@ -125,6 +135,7 @@ class _AutomationEditorScreenState extends State<AutomationEditorScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving) return; // guard double-tap while DB write is in flight
     final name = _nameController.text.trim();
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -132,18 +143,28 @@ class _AutomationEditorScreenState extends State<AutomationEditorScreen> {
       );
       return;
     }
-    final db = context.read<DatabaseService>();
-    final now = DateTime.now();
-    if (_isNew) {
-      await db.insertAutomation(Automation(
-        name: name, branches: _branches, createdAt: now, updatedAt: now,
-      ));
-    } else {
-      await db.updateAutomation(widget.automation!.copyWith(
-        name: name, branches: _branches, updatedAt: now,
-      ));
+    setState(() => _saving = true);
+    try {
+      final db = context.read<DatabaseService>();
+      final now = DateTime.now();
+      if (_isNew) {
+        await db.insertAutomation(Automation(
+          name: name, branches: _branches, createdAt: now, updatedAt: now,
+        ));
+      } else {
+        await db.updateAutomation(widget.automation!.copyWith(
+          name: name, branches: _branches, updatedAt: now,
+        ));
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Save failed: $e')),
+        );
+      }
     }
-    if (mounted) Navigator.pop(context);
   }
 
   @override
@@ -160,9 +181,18 @@ class _AutomationEditorScreenState extends State<AutomationEditorScreen> {
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         actions: [
           TextButton(
-            onPressed: _save,
-            child: const Text('Save',
-                style: TextStyle(color: AppColors.accentBlue, fontSize: 15, fontWeight: FontWeight.w600)),
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(
+                    width: 16, height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.accentBlue),
+                  )
+                : const Text('Save',
+                    style: TextStyle(
+                        color: AppColors.accentBlue,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600)),
           ),
         ],
       ),

@@ -28,6 +28,10 @@ class DatabaseService {
     return openDatabase(
       path,
       version: 3,
+      onConfigure: (db) async {
+        // sqflite defaults to FK off — turn it on so ON DELETE CASCADE works.
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: (db, v) async {
         await _onCreate(db, v);
         await _createTrackerTodoTables(db);
@@ -263,23 +267,36 @@ class DatabaseService {
 
   Future<int> insertAutomation(Automation automation) async {
     final db = await database;
-    final id = await db.insert('automations', automation.toMap());
-    for (final branch in automation.branches) {
-      await _insertBranch(branch.copyWith(automationId: id));
-    }
-    return id;
+    return db.transaction((txn) async {
+      final id = await txn.insert('automations', automation.toMap());
+      for (final branch in automation.branches) {
+        await _insertBranchTxn(
+          txn,
+          branch.copyWith(id: null, automationId: id),
+        );
+      }
+      return id;
+    });
   }
 
   Future<void> updateAutomation(Automation automation) async {
     final db = await database;
-    await db.update('automations', automation.toMap(),
-        where: 'id = ?', whereArgs: [automation.id]);
-    // Replace all branches
-    await db.delete('condition_branches',
-        where: 'automation_id = ?', whereArgs: [automation.id]);
-    for (final branch in automation.branches) {
-      await _insertBranch(branch.copyWith(automationId: automation.id));
-    }
+    await db.transaction((txn) async {
+      await txn.update('automations', automation.toMap(),
+          where: 'id = ?', whereArgs: [automation.id]);
+      // Replace all branches. action_items cascade-delete via FK.
+      await txn.delete('condition_branches',
+          where: 'automation_id = ?', whereArgs: [automation.id]);
+      for (final branch in automation.branches) {
+        await _insertBranchTxn(
+          txn,
+          // Strip the old PK so SQLite assigns a fresh one — old IDs may
+          // belong to rows we just deleted, but explicit-PK reinsert is
+          // brittle if anything ever leaves orphans.
+          branch.copyWith(id: null, automationId: automation.id),
+        );
+      }
+    });
   }
 
   Future<void> deleteAutomation(int id) async {
@@ -304,12 +321,14 @@ class DatabaseService {
     return branches;
   }
 
-  Future<int> _insertBranch(ConditionBranch branch) async {
-    final db = await database;
-    final id = await db.insert('condition_branches', branch.toMap());
+  Future<int> _insertBranchTxn(
+      DatabaseExecutor txn, ConditionBranch branch) async {
+    final id = await txn.insert('condition_branches', branch.toMap());
     for (final action in branch.actions) {
-      await db.insert(
-          'action_items', action.copyWith(conditionBranchId: id).toMap());
+      await txn.insert(
+        'action_items',
+        action.copyWith(id: null, conditionBranchId: id).toMap(),
+      );
     }
     return id;
   }

@@ -369,6 +369,7 @@ class _NfcWriterScreenState extends State<NfcWriterScreen> {
     await _writeNdef([_launchAppRecord(pkg)], 'App Launch');
   }
 
+
   // ── UPI Payment Dialog ────────────────────────────────────────────────
 
   Future<void> _writeUpiPayment() async {
