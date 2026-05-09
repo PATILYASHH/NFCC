@@ -34,11 +34,16 @@ class SmartSwitchCapture(private val context: Context) : MethodChannel.MethodCal
         const val CHANNEL = "nfcc/smart_switch"
 
         // Foreground packages that we know how to capture as media handoffs.
+        // YT Music variants stay tagged "youtube" — the YouTubeUrlNormalizer
+        // preserves music.youtube.com URLs so they hand off to the desktop
+        // YT Music PWA / browser correctly.
         private val MEDIA_PACKAGES = mapOf(
             "com.google.android.youtube" to "youtube",
             "app.revanced.android.youtube" to "youtube",
             "app.rvx.android.youtube" to "youtube", // ReVanced eXtended
             "com.google.android.apps.youtube.music" to "youtube",
+            "app.revanced.android.apps.youtube.music" to "youtube", // ReVanced YT Music
+            "app.rvx.android.apps.youtube.music" to "youtube",      // RVX YT Music
             "com.spotify.music" to "spotify",
         )
 
@@ -164,7 +169,11 @@ class SmartSwitchCapture(private val context: Context) : MethodChannel.MethodCal
 
         return when (kind) {
             "youtube" -> {
-                val normalized = YouTubeUrlNormalizer.normalize(rawUrl, positionMs)
+                val isMusic = pkg.contains(".youtube.music", ignoreCase = true) ||
+                              pkg.endsWith(".apps.youtube.music", ignoreCase = true)
+                val normalized = YouTubeUrlNormalizer.normalize(
+                    rawUrl, positionMs, forceMusicHost = isMusic,
+                )
                 mapOf(
                     "kind" to "youtube",
                     "url" to normalized,
@@ -196,7 +205,15 @@ class SmartSwitchCapture(private val context: Context) : MethodChannel.MethodCal
         appName: String?,
         snap: SmartSwitchAccessibilityService.Snapshot,
     ): Map<String, Any?> {
-        val url = if (snap.foregroundPackage == pkg) snap.browserUrl else null
+        var url = if (snap.foregroundPackage == pkg) snap.browserUrl else null
+        // Snap URL can be stale-null when the URL bar was scrolled off-
+        // screen at last event. Force a fresh scrape before giving up.
+        if (url.isNullOrBlank()) {
+            val fresh = SmartSwitchAccessibilityService.refreshNowIfPossible()
+            if (fresh != null && fresh.foregroundPackage == pkg) {
+                url = fresh.browserUrl
+            }
+        }
         return mapOf(
             "kind" to "browser",
             "url" to ensureScheme(url),

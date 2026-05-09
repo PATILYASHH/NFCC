@@ -27,11 +27,17 @@ object YouTubeUrlNormalizer {
      * @param fallbackPositionMs  position from MediaSession when the URL
      *                            doesn't carry a t= param. 0 = ignore.
      */
-    fun normalize(raw: String?, fallbackPositionMs: Long = 0L): String? {
-        if (raw.isNullOrBlank()) return null
-        val trimmed = raw.trim()
+    fun normalize(
+        raw: String?,
+        fallbackPositionMs: Long = 0L,
+        forceMusicHost: Boolean = false,
+    ): String? {
+        if (raw.isNullOrBlank() && !forceMusicHost) return null
+        val trimmed = raw?.trim() ?: ""
 
-        val (videoId, urlPositionSec) = extract(trimmed) ?: return trimmed
+        val extracted = if (trimmed.isEmpty()) null else extract(trimmed)
+        if (extracted == null && trimmed.isNotEmpty()) return trimmed
+        val (videoId, urlPositionSec) = extracted ?: return null
 
         val seconds = when {
             urlPositionSec > 0 -> urlPositionSec
@@ -39,7 +45,17 @@ object YouTubeUrlNormalizer {
             else -> 0
         }
 
-        val base = "https://www.youtube.com/watch?v=$videoId"
+        // Route YT Music handoffs to music.youtube.com — desktop YT Music
+        // PWA picks up the protocol and opens the song there. Plain
+        // youtube.com would open the regular video player instead.
+        val host = if (forceMusicHost ||
+            trimmed.contains("music.youtube.com", ignoreCase = true)
+        ) {
+            "music.youtube.com"
+        } else {
+            "www.youtube.com"
+        }
+        val base = "https://$host/watch?v=$videoId"
         return if (seconds > 0) "$base&t=${seconds}s" else base
     }
 

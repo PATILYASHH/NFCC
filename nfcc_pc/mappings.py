@@ -91,7 +91,9 @@ DEFAULT_MAPPINGS: Dict[str, Dict[str, Dict[str, Any]]] = {
         # them back into the YouTube pipeline.
         "app.revanced.android.youtube": {"kind_override": "youtube"},
         "app.rvx.android.youtube":      {"kind_override": "youtube"},
-        "com.google.android.apps.youtube.music": {"kind_override": "youtube"},
+        "com.google.android.apps.youtube.music":      {"kind_override": "youtube"},
+        "app.revanced.android.apps.youtube.music":    {"kind_override": "youtube"},
+        "app.rvx.android.apps.youtube.music":         {"kind_override": "youtube"},
 
         # Music apps — protocol-handler-first
         "com.spotify.music":         {"kind_override": "spotify"},

@@ -51,6 +51,14 @@ class SmartSwitchAccessibilityService : AccessibilityService() {
 
         fun isEnabled(): Boolean = instance != null
 
+        /**
+         * Trigger an immediate fresh scrape of the active window. Returns
+         * the new snapshot, or null if the service isn't connected
+         * (permission off, or transient teardown). Safe to call from any
+         * thread; falls through harmlessly when the service is gone.
+         */
+        fun refreshNowIfPossible(): Snapshot? = instance?.refreshNow()
+
         @Volatile
         private var instance: SmartSwitchAccessibilityService? = null
     }
@@ -129,6 +137,14 @@ class SmartSwitchAccessibilityService : AccessibilityService() {
                     // as garbage.
                     if (url != null && !looksLikeUrl(url!!)) url = null
                 }
+                // Generic URL scan as a fallback. Catches:
+                //   - Chrome variants whose url_bar ID drifts between
+                //     versions (use it when the known ID came back null)
+                //   - Custom Tabs / WebView hosts where the omnibox lives
+                //     in a different namespace
+                if (url == null && (pkg in BROWSER_URL_NODE_IDS || isLikelyBrowser(pkg))) {
+                    url = scanTreeForUrl(root)
+                }
                 if (pkg in WHATSAPP_PACKAGES) {
                     chatTitle = readWhatsAppChatTitle(root)
                     draft = readWhatsAppDraft(root)
@@ -138,6 +154,19 @@ class SmartSwitchAccessibilityService : AccessibilityService() {
             Log.w(TAG, "node scrape failed for $pkg: ${e.message}")
         }
 
+        // Don't blow away a previously-good URL / chat title / draft just
+        // because this particular event happened to fire while the URL
+        // bar was scrolled off-screen. Chrome aggressively collapses its
+        // omnibox on scroll, so events would arrive with url=null and
+        // wipe the cache. Keep the last good value as long as we're still
+        // looking at the same package.
+        val prev = latest
+        if (prev.foregroundPackage == pkg) {
+            if (url == null) url = prev.browserUrl
+            if (chatTitle == null) chatTitle = prev.whatsappChatTitle
+            if (draft == null) draft = prev.whatsappDraft
+        }
+
         latest = Snapshot(
             foregroundPackage = pkg,
             browserUrl = url,
@@ -145,6 +174,53 @@ class SmartSwitchAccessibilityService : AccessibilityService() {
             whatsappDraft = draft,
             capturedAtMs = System.currentTimeMillis(),
         )
+    }
+
+    /**
+     * Trigger a fresh scrape on demand — called by SmartSwitchCapture at
+     * NFC-tap time so we don't have to rely solely on the event-driven
+     * cache. Safe to call from any thread; updates `latest` in place.
+     */
+    fun refreshNow(): Snapshot {
+        val pkg = try { rootInActiveWindow?.packageName?.toString() } catch (_: Exception) { null }
+            ?: latest.foregroundPackage
+        if (pkg != null) refreshSnapshotFor(pkg)
+        return latest
+    }
+
+    private fun isLikelyBrowser(pkg: String): Boolean {
+        // Heuristic for browsers we don't have a known URL-bar node for.
+        return "browser" in pkg || "chrome" in pkg || "firefox" in pkg ||
+               "webview" in pkg || pkg.startsWith("org.mozilla.")
+    }
+
+    /**
+     * Walk the AccessibilityNodeInfo tree breadth-first looking for a
+     * text node whose content looks like a URL. Caps at ~400 nodes so a
+     * worst-case page (Reddit / Twitter timeline) doesn't stall the
+     * accessibility thread. We prefer the longest match — Chrome's tab
+     * strip lists short hostnames before the full URL bar text.
+     */
+    private fun scanTreeForUrl(root: AccessibilityNodeInfo): String? {
+        var best: String? = null
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var visited = 0
+        while (queue.isNotEmpty() && visited < 400) {
+            val node = queue.removeFirst()
+            visited++
+            try {
+                val t = node.text?.toString()?.trim()
+                if (!t.isNullOrEmpty() && looksLikeUrl(t)) {
+                    if (best == null || t.length > best!!.length) best = t
+                }
+                for (i in 0 until node.childCount) {
+                    val c = node.getChild(i) ?: continue
+                    queue.add(c)
+                }
+            } catch (_: Exception) { /* node may be stale */ }
+        }
+        return best
     }
 
     private fun readNodeText(root: AccessibilityNodeInfo, viewId: String): String? {

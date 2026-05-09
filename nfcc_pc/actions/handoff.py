@@ -98,7 +98,23 @@ def _strat_url(rule: Dict[str, Any]) -> ActionResult:
     payload = rule["_payload"]
     url = (payload.get("url") or rule.get("url") or "").strip()
     if not url:
-        return fail("No URL in payload or rule")
+        # Empty-URL fallback per kind. Better to open SOMETHING reasonable
+        # than to flash a red X in the action log when the accessibility
+        # scrape missed the omnibox or MediaSession returned no URI.
+        kind = (rule.get("_kind") or "").lower()
+        app_pkg = (payload.get("appPkg") or "").lower()
+        if kind == "youtube" and "youtube.music" in app_pkg:
+            fallback = "https://music.youtube.com/"
+        elif kind == "youtube":
+            fallback = "https://www.youtube.com/"
+        elif kind == "spotify":
+            fallback = "https://open.spotify.com/"
+        elif kind == "browser":
+            fallback = "about:blank"
+        else:
+            return fail("No URL in payload or rule")
+        _open_url(fallback, rule.get("browser", "default"))
+        return ok(f"Opened {kind} home (no specific URL captured)")
     _open_url(url, rule.get("browser", "default"))
     return ok(f"Opened: {url}")
 
