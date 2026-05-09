@@ -74,7 +74,7 @@ export default function Home() {
           <div>
             <div className="hero-badge reveal">
               <span className="dot" />
-              v1.2.0 · Released April 2026
+              v1.5.0 · Released May 2026 · Smart Switch
             </div>
             <h1 className="reveal d1">
               One Tap. <br />
@@ -110,7 +110,7 @@ export default function Home() {
         <div className="container">
           <div className="stats">
             <Stat num="60+" lbl="Actions" />
-            <Stat num="3" lbl="Smart NFC Modes" />
+            <Stat num="4" lbl="Smart NFC Modes" />
             <Stat num="0" lbl="Cloud Servers" />
             <Stat num="MIT" lbl="License" />
           </div>
@@ -259,7 +259,10 @@ export default function Home() {
               </p>
               <ul className="list">
                 <li>
-                  <CheckIcon /> 32 PC actions (apps, windows, media, system)
+                  <CheckIcon /> 33 PC actions — incl. Smart Switch handoff
+                </li>
+                <li>
+                  <CheckIcon /> Editable mapping table (web dashboard, JSON)
                 </li>
                 <li>
                   <CheckIcon /> WebSocket server over local Wi-Fi
@@ -334,7 +337,7 @@ export default function Home() {
                 className={`tab-btn ${actionTab === 'pc' ? 'active' : ''}`}
                 onClick={() => setActionTab('pc')}
               >
-                PC · 32
+                PC · 33
               </button>
             </div>
           </div>
@@ -517,8 +520,8 @@ export default function Home() {
               <h3>Keep NFCC free & open-source.</h3>
               <p>
                 NFCC is MIT, ad-free, tracker-free, and paid for out of pocket.
-                If it saves you time, a monthly sponsorship keeps the releases,
-                server costs, and F-Droid builds coming.
+                If it saves you time, a monthly sponsorship keeps the releases
+                and the next features shipping.
               </p>
             </div>
             <a
@@ -564,6 +567,12 @@ export default function Home() {
 /* ========================= Data ========================= */
 
 const FEATURES = [
+  {
+    title: 'Smart Switch · NEW',
+    body: 'Tap a tag and your PC picks up exactly what you were doing — YouTube at the same timestamp (incl. ReVanced), Spotify track, browser tab, WhatsApp chat with the draft auto-pasted. Per-app mapping table editable from the PC dashboard.',
+    color: '#00E5FF',
+    icon: <SwapIcon />,
+  },
   {
     title: 'Routines',
     body: 'IF/ELSE automations over time, weekday, Wi-Fi SSID, and Bluetooth state. Chain phone + PC actions per branch.',
@@ -652,6 +661,7 @@ const PHONE_ACTIONS = [
 ];
 
 const PC_ACTIONS = [
+  { name: 'Smart Switch Handoff', ic: '↔', color: '#00E5FF' },
   { name: 'Launch Application', ic: '🚀', color: '#00B0FF' },
   { name: 'Close Window', ic: '✕', color: '#EF4444' },
   { name: 'Minimize All', ic: '➖', color: '#A0A4AE' },
@@ -790,9 +800,9 @@ const PHASES = [
   },
   {
     num: '08',
-    status: 'active',
-    title: 'F-Droid launch',
-    body: 'RFP submitted. Build recipe with auto-update on tags. Next: store listing.',
+    status: 'done',
+    title: 'Smart Switch · v1.5',
+    body: 'Foreground-app handoff to PC: YouTube/ReVanced timestamp, Spotify, browser tab, WhatsApp draft. Editable mapping table on the PC dashboard.',
   },
 ];
 
@@ -1067,6 +1077,20 @@ function ReorderIcon({ color = 'currentColor' }) {
         d="M4 7h12M4 12h12M4 17h12M20 5v14M17 8l3-3 3 3M17 16l3 3 3-3"
         stroke={color}
         strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function SwapIcon({ color = 'currentColor' }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 8h13m0 0-4-4m4 4-4 4M20 16H7m0 0 4 4m-4-4 4-4"
+        stroke={color}
+        strokeWidth="1.7"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
