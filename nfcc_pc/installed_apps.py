@@ -443,17 +443,36 @@ def _lookup_no_alias(pool: List[Dict[str, Any]], q: str) -> Optional[Dict[str, A
 
 def app_for_phone_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Convenience: given a Smart Switch capture payload, return the
-    best-guess installed PC app. Tries `appName`, then the last segment
-    of `appPkg`, then a few common phone→PC name remaps.
+    best-guess installed PC app. Tries `appName`, then the last and
+    middle segments of `appPkg`, then a few common phone→PC name remaps.
     """
+    # Filter out generic Android-package segments that would match
+    # almost anything via substring search ("app" → "Xbox PC App",
+    # "client" → "Mail Client", etc.).
+    GENERIC = {
+        "app", "apps", "main", "core", "client", "service", "services",
+        "helper", "lib", "android", "mobile", "google", "samsung",
+        "xiaomi", "huawei", "asus", "common", "shared", "ui", "v2",
+        "v3", "free", "pro", "premium", "test", "beta", "dev",
+    }
+
+    def usable(c: str) -> bool:
+        c = c.strip().lower()
+        return bool(c) and len(c) >= 4 and c not in GENERIC
+
     candidates: List[str] = []
     name = (payload.get("appName") or "").strip()
-    if name:
+    if usable(name):
         candidates.append(name)
     pkg = (payload.get("appPkg") or "").strip()
     if pkg:
-        candidates.append(pkg.rsplit(".", 1)[-1])  # e.g. com.foo.bar → bar
-        candidates.append(pkg.split(".")[1] if pkg.count(".") >= 1 else pkg)
+        last = pkg.rsplit(".", 1)[-1]    # com.foo.bar → bar
+        if usable(last):
+            candidates.append(last)
+        if pkg.count(".") >= 1:
+            mid = pkg.split(".")[1]      # com.anydesk.foo → anydesk
+            if usable(mid) and mid not in candidates:
+                candidates.append(mid)
 
     # Lightweight phone→desktop name remaps. Catches the cases where
     # the Android app label differs from the Windows binary.

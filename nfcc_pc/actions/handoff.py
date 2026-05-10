@@ -247,6 +247,19 @@ def _launch_via_scanner(
         pass  # scanner is opportunistic
 
     if name:
+        # If neither alias nor PATH resolves the name AND the scanner
+        # couldn't help, short-circuit with an actionable error instead
+        # of letting apps.launch_app return the terse "No PC equivalent"
+        # message. Saves the user a trip into the action log to figure
+        # out what to do next.
+        if (apps.APP_ALIASES.get(name.lower()) is None
+                and not apps._looks_launchable(name)):
+            pkg_hint = (payload.get("appPkg") or "").strip()
+            extra = f" (Android pkg: {pkg_hint})" if pkg_hint else ""
+            return fail(
+                f"No PC app mapped for '{name}'{extra}. "
+                "Open the dashboard → App Scanner → search and click Map."
+            )
         return apps.launch_app({"name": name})
     pkg = (payload.get("appPkg") or "").strip()
     if pkg:
