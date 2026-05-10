@@ -46,7 +46,7 @@ object MediaSessionReader {
                                 ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
                 val artist      = md?.getString(MediaMetadata.METADATA_KEY_ARTIST)
                 val description = md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_DESCRIPTION)
-                                ?: md?.getString(MediaMetadata.METADATA_KEY_DESCRIPTION)
+                                ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
                 val durationMs  = md?.getLong(MediaMetadata.METADATA_KEY_DURATION) ?: 0L
 
                 val pos = livePositionMs(c.playbackState)
