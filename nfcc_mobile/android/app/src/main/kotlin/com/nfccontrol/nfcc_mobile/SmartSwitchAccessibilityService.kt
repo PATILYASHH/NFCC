@@ -203,6 +203,7 @@ class SmartSwitchAccessibilityService : AccessibilityService() {
      */
     private fun scanTreeForUrl(root: AccessibilityNodeInfo): String? {
         var best: String? = null
+        var bestScore = 0
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var visited = 0
@@ -210,10 +211,17 @@ class SmartSwitchAccessibilityService : AccessibilityService() {
             val node = queue.removeFirst()
             visited++
             try {
-                val t = node.text?.toString()?.trim()
-                if (!t.isNullOrEmpty() && looksLikeUrl(t)) {
-                    if (best == null || t.length > best!!.length) best = t
-                }
+                // Walk both .text and .contentDescription — Chrome puts
+                // the full URL in CD even when the visible text has only
+                // the host.
+                listOf(node.text?.toString(), node.contentDescription?.toString())
+                    .forEach { s ->
+                        val score = scoreUrl(s)
+                        if (score > bestScore) {
+                            bestScore = score
+                            best = s!!.trim()
+                        }
+                    }
                 for (i in 0 until node.childCount) {
                     val c = node.getChild(i) ?: continue
                     queue.add(c)
@@ -226,10 +234,31 @@ class SmartSwitchAccessibilityService : AccessibilityService() {
     private fun readNodeText(root: AccessibilityNodeInfo, viewId: String): String? {
         val nodes = root.findAccessibilityNodeInfosByViewId(viewId) ?: return null
         for (n in nodes) {
-            val t = n.text?.toString()?.trim()
-            if (!t.isNullOrEmpty()) return t
+            // Prefer contentDescription when it looks like a richer URL
+            // than the visible text — Chrome's omnibox sometimes hides
+            // the scheme + path and only displays the host, but
+            // contentDescription carries the full URL for screen readers.
+            val cd = n.contentDescription?.toString()?.trim()
+            val txt = n.text?.toString()?.trim()
+            val cdScored = scoreUrl(cd)
+            val txtScored = scoreUrl(txt)
+            // Higher score wins; pick whichever has scheme / longer.
+            val pick = if (cdScored > txtScored) cd else txt
+            if (!pick.isNullOrEmpty()) return pick
         }
         return null
+    }
+
+    /** Higher = better URL candidate. 0 = unusable. */
+    private fun scoreUrl(s: String?): Int {
+        if (s.isNullOrBlank()) return 0
+        val v = s.trim()
+        if (" " in v) return 0
+        if (v.startsWith("https://", true)) return 100 + v.length
+        if (v.startsWith("http://", true))  return 80  + v.length
+        if ("." in v && "/" in v)            return 40  + v.length
+        if ("." in v)                        return 10  + v.length
+        return 0
     }
 
     private fun looksLikeUrl(s: String): Boolean {

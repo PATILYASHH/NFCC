@@ -171,16 +171,42 @@ class SmartSwitchCapture(private val context: Context) : MethodChannel.MethodCal
             "youtube" -> {
                 val isMusic = pkg.contains(".youtube.music", ignoreCase = true) ||
                               pkg.endsWith(".apps.youtube.music", ignoreCase = true)
-                val normalized = YouTubeUrlNormalizer.normalize(
-                    rawUrl, positionMs, forceMusicHost = isMusic,
-                )
+                // YouTube doesn't always populate METADATA_KEY_MEDIA_URI —
+                // ReVanced builds in particular sometimes leave it blank
+                // and put the video ID in METADATA_KEY_MEDIA_ID, or hide
+                // a URL inside the description string. Try every plausible
+                // key in order; first one that yields a YouTube watch URL
+                // wins. Position from MediaSession (live-corrected) is
+                // applied to whichever candidate we land on, so progress
+                // is preserved as long as at least one key has the ID.
+                val candidates = listOfNotNull(
+                    rawUrl,
+                    reading?.mediaId,
+                    reading?.description,
+                ).map { it.trim() }.filter { it.isNotEmpty() }
+
+                var normalized: String? = null
+                for (cand in candidates) {
+                    normalized = YouTubeUrlNormalizer.normalize(
+                        cand, positionMs, forceMusicHost = isMusic,
+                    )
+                    // Only accept candidates that produced a clean
+                    // watch URL — else keep trying. A pass-through
+                    // (non-YouTube-shaped string) shouldn't satisfy us.
+                    if (normalized != null &&
+                        (normalized!!.contains("/watch?v=") ||
+                         normalized!!.startsWith("https://music.youtube.com/"))
+                    ) break
+                    normalized = null
+                }
                 mapOf(
                     "kind" to "youtube",
                     "url" to normalized,
                     "appPkg" to pkg,
                     "appName" to appName,
                     "positionMs" to positionMs,
-                    "rawUrl" to rawUrl, // for debugging
+                    "rawUrl" to rawUrl, // debug
+                    "title" to reading?.title,
                 )
             }
             "spotify" -> {

@@ -32,12 +32,28 @@ object YouTubeUrlNormalizer {
         fallbackPositionMs: Long = 0L,
         forceMusicHost: Boolean = false,
     ): String? {
-        if (raw.isNullOrBlank() && !forceMusicHost) return null
-        val trimmed = raw?.trim() ?: ""
+        val trimmed = raw?.trim().orEmpty()
+        if (trimmed.isEmpty()) return null
 
-        val extracted = if (trimmed.isEmpty()) null else extract(trimmed)
-        if (extracted == null && trimmed.isNotEmpty()) return trimmed
-        val (videoId, urlPositionSec) = extracted ?: return null
+        // Some apps stash the bare 11-char YouTube video ID in
+        // METADATA_KEY_MEDIA_ID rather than a full URL. If that's all we
+        // got, build the URL ourselves.
+        val videoId: String
+        val urlPositionSec: Int
+        if (trimmed.length == 11 && ID_REGEX.matches(trimmed)) {
+            videoId = trimmed
+            urlPositionSec = 0
+        } else {
+            val extracted = extract(trimmed)
+            if (extracted == null) {
+                // Not YouTube-shaped at all — pass through unchanged so
+                // callers can still ship the URL even if we couldn't
+                // canonicalise it (e.g. a non-watch link).
+                return trimmed
+            }
+            videoId = extracted.first
+            urlPositionSec = extracted.second
+        }
 
         val seconds = when {
             urlPositionSec > 0 -> urlPositionSec

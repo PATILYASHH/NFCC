@@ -285,6 +285,9 @@ def _strat_whatsapp_paste(rule: Dict[str, Any]) -> ActionResult:
         rule.get("force_desktop", False) or _whatsapp_desktop_installed()
     )
     if use_desktop:
+        # whatsapp://send?phone=N drops you straight into that chat.
+        # whatsapp:// just opens WA — the user has to search by name,
+        # since WhatsApp has no public deep link for name-based chats.
         target = f"whatsapp://send?phone={digits}" if has_phone else "whatsapp://"
         _open_uri_direct(target)
         opened = "WhatsApp Desktop"
@@ -302,15 +305,56 @@ def _strat_whatsapp_paste(rule: Dict[str, Any]) -> ActionResult:
         opened = "WhatsApp Web"
         default_wait_ms = 2500
 
-    draft = payload.get("draftText") or ""
-    if draft and rule.get("auto_paste", True):
-        wait_ms = int(rule.get("wait_ms", default_wait_ms) or 0)
+    # Wait once before any paste so WA finishes loading.
+    wait_ms = int(rule.get("wait_ms", default_wait_ms) or 0)
+
+    draft = (payload.get("draftText") or "").strip()
+    auto_paste = rule.get("auto_paste", True)
+
+    # Name-based chat (no phone number) → there's no protocol handler
+    # that can deep-link us into the right thread. Best we can do is
+    # focus the global chat search (Ctrl+F is WA Desktop's universal
+    # "search…" shortcut) and paste the chat name so a single Enter
+    # lands the user in that conversation. If a draft was typed too,
+    # we then paste it once we're inside.
+    name_search = (
+        not has_phone and bool(chat) and use_desktop and auto_paste
+    )
+
+    if name_search:
+        if wait_ms > 0:
+            time.sleep(wait_ms / 1000.0)
+        _set_clipboard(chat)
+        time.sleep(0.1)
+        # Focus WA's search field. Ctrl+F is the documented shortcut
+        # ("search messages") but at app top-level it surfaces the chat
+        # search; Alt+/ is the alternate. We send Ctrl+F.
+        key_press(0x11, 0x46)  # Ctrl+F
+        time.sleep(0.25)
+        _paste()
+        # Don't auto-press Enter — risk is selecting the wrong chat
+        # when there are multiple matches. Better to leave the user
+        # one keystroke away.
+        if draft:
+            return ok(
+                f"Opened {opened}. Search pre-filled with '{chat}' — "
+                f"press Enter, then paste the draft "
+                f"(also on clipboard once you confirm the chat)."
+            )
+        return ok(f"Opened {opened}. Search pre-filled with '{chat}' — press Enter to open chat.")
+
+    if draft and auto_paste:
         if wait_ms > 0:
             time.sleep(wait_ms / 1000.0)
         _set_clipboard(draft)
         time.sleep(0.1)
         _paste()
         return ok(f"Opened {opened} + pasted draft ({len(draft)} chars)")
+
+    if not has_phone and chat:
+        # No draft, name-only chat, auto_paste off. Surface the name
+        # so the user knows what to search.
+        return ok(f"Opened {opened}. Chat: '{chat}' — search manually.")
     return ok(f"Opened {opened}")
 
 

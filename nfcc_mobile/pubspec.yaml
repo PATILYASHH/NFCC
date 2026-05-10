@@ -2,7 +2,7 @@ name: nfcc_mobile
 description: "NFCC - NFC Control: Automate your phone and PC with NFC tags"
 publish_to: 'none'
 
-version: 1.5.3+10
+version: 1.5.4+11
 
 environment:
   sdk: ^3.10.8
